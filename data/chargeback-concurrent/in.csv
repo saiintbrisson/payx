@@ -1,0 +1,8 @@
+type,client,tx,amount
+deposit,1,1,100.00
+deposit,2,2,200.00
+withdrawal,2,3,50.00
+dispute,1,1,
+deposit,2,4,30.00
+withdrawal,2,5,20.00
+chargeback,1,1,
