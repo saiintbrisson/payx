@@ -20,6 +20,8 @@ pub enum TransactionError {
     NotEnoughBalance,
     #[error("duplicate transaction ids")]
     DuplicateTransactionId,
+    #[error("transactions can only have positive amounts")]
+    AmountCannotBeNegative,
 }
 
 /// A client account.
@@ -78,13 +80,6 @@ impl ClientAccount {
 
         let diff = TxDiff::calculate(self, &tx)?;
 
-        self.available += diff.available;
-        self.held += diff.held;
-
-        if let Some(lock) = diff.lock {
-            self.locked = lock;
-        }
-
         match diff.dispute {
             Some(DisputeAction::Start(id)) => self.disputes.push(id),
             Some(DisputeAction::End(id)) => self.disputes.retain(|dispute| *dispute != id),
@@ -95,6 +90,13 @@ impl ClientAccount {
 
                 let _ = self.log.insert(tx.id, tx);
             }
+        }
+
+        self.available += diff.available;
+        self.held += diff.held;
+
+        if let Some(lock) = diff.lock {
+            self.locked = lock;
         }
 
         Ok(())
@@ -152,11 +154,15 @@ impl serde::Serialize for ClientAccount {
         //
         // Notice "total", as it's computed on demand.
 
+        fn format_decimal(dec: Decimal) -> String {
+            format!("{dec:.4}")
+        }
+
         let mut ser = serializer.serialize_struct("ClientAccount", 5)?;
         ser.serialize_field("client", &self.id())?;
-        ser.serialize_field("available", &self.available())?;
-        ser.serialize_field("held", &self.held())?;
-        ser.serialize_field("total", &self.total())?;
+        ser.serialize_field("available", &format_decimal(self.available()))?;
+        ser.serialize_field("held", &format_decimal(self.held()))?;
+        ser.serialize_field("total", &format_decimal(self.total()))?;
         ser.serialize_field("locked", &self.locked())?;
         ser.end()
     }
@@ -198,9 +204,19 @@ impl TxDiff {
     /// This function owns all transaction behaviors and rules.
     fn calculate(client: &ClientAccount, tx: &Transaction) -> Result<Self, TransactionError> {
         match tx.ty {
-            TransactionType::Deposit { amount } => return Ok(Self::deposit(amount)),
+            TransactionType::Deposit { amount } => {
+                if amount.is_sign_negative() {
+                    return Err(TransactionError::AmountCannotBeNegative);
+                }
+
+                return Ok(Self::deposit(amount));
+            }
 
             TransactionType::Withdrawal { amount } => {
+                if amount.is_sign_negative() {
+                    return Err(TransactionError::AmountCannotBeNegative);
+                }
+
                 if !client.has_balance(amount) {
                     return Err(TransactionError::NotEnoughBalance);
                 }
